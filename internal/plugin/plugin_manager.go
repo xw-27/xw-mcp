@@ -11,11 +11,13 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/rjeczalik/notify"
+
+	"xw-mcp/internal/config"
 )
 
 // PluginManager 是插件管理器
 type PluginManager struct {
-	dir        string
+	cfg        *config.ConfigManager
 	maxDepth   int
 	plugins    map[string]*Plugin
 	paths      map[string]string
@@ -29,12 +31,17 @@ type PluginManager struct {
 }
 
 // New 创建 PluginManager 实例
-// dir: 插件目录路径
+// cfg: ConfigManager 实例，用于获取插件目录等配置
 // maxDepth: 最大扫描深度
 // callbacks: 可选的回调函数列表
-func New(dir string, maxDepth int, callbacks ...EventCallback) (*PluginManager, error) {
+func New(cfg *config.ConfigManager, maxDepth int, callbacks ...EventCallback) (*PluginManager, error) {
+	_, ok := cfg.Get("server.plugins-dir")
+	if !ok {
+		return nil, fmt.Errorf("plugins-dir not found in config")
+	}
+
 	pm := &PluginManager{
-		dir:      dir,
+		cfg:      cfg,
 		maxDepth: maxDepth,
 		plugins:  make(map[string]*Plugin),
 		paths:    make(map[string]string),
@@ -74,7 +81,8 @@ func (pm *PluginManager) initRuntime() error {
 
 // scanAndLoad 扫描目录并加载所有插件
 func (pm *PluginManager) scanAndLoad() error {
-	files, err := pm.scanDir(pm.dir, 0)
+	pluginsDir, _ := pm.cfg.Get("server.plugins-dir")
+	files, err := pm.scanDir(pluginsDir.String(), 0)
 	if err != nil {
 		return fmt.Errorf("scan dir failed: %w", err)
 	}
@@ -127,49 +135,54 @@ func (pm *PluginManager) scanDir(path string, depth int) ([]string, error) {
 func (pm *PluginManager) loadFile(filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("read file failed: %w", err)
+		log.Printf("[plugin] load file %s failed: %v", filePath, err)
+		pm.removePlugin(filePath)
+		return nil
 	}
 
-	// 执行 JS 代码获取 module.exports
 	vm := goja.New()
-
-	// 启用 require
 	registry := new(require.Registry)
 	registry.Enable(vm)
 
-	// 设置全局 module 和 exports
 	module := vm.NewObject()
 	exports := vm.NewObject()
 	module.Set("exports", exports)
 	vm.Set("module", module)
 	vm.Set("exports", exports)
 
-	// 执行 JS 代码
 	_, err = vm.RunString(string(content))
 	if err != nil {
-		return fmt.Errorf("execute script failed: %w", err)
+		log.Printf("[plugin] execute script %s failed: %v", filePath, err)
+		pm.removePlugin(filePath)
+		return nil
 	}
 
-	// 获取 module.exports
 	result := module.Get("exports")
 
-	// 解析结果，可能是对象或数组
-	if result != nil && !goja.IsUndefined(result) && !goja.IsNull(result) {
-		obj := result.ToObject(vm)
-		if obj.ClassName() == "Array" {
-			// 数组形式：module.exports = [{ name: ..., execute: ... }, ...]
-			arrLen := obj.Get("length").ToInteger()
-			for i := int64(0); i < arrLen; i++ {
-				item := obj.Get(fmt.Sprintf("%d", i))
-				if plugin := pm.parsePlugin(item, filePath, vm); plugin != nil {
-					pm.registerPlugin(plugin)
-				}
-			}
-		} else {
-			// 对象形式：module.exports = { name: ..., execute: ... }
-			if plugin := pm.parsePlugin(result, filePath, vm); plugin != nil {
+	if result == nil || goja.IsUndefined(result) || goja.IsNull(result) {
+		log.Printf("[plugin] script %s has no exports, treating as empty", filePath)
+		pm.removePlugin(filePath)
+		return nil
+	}
+
+	obj := result.ToObject(vm)
+	if obj == nil {
+		log.Printf("[plugin] exports object is nil in %s", filePath)
+		pm.removePlugin(filePath)
+		return nil
+	}
+
+	if obj.ClassName() == "Array" {
+		arrLen := obj.Get("length").ToInteger()
+		for i := int64(0); i < arrLen; i++ {
+			item := obj.Get(fmt.Sprintf("%d", i))
+			if plugin := pm.parsePlugin(item, filePath, vm); plugin != nil {
 				pm.registerPlugin(plugin)
 			}
+		}
+	} else {
+		if plugin := pm.parsePlugin(result, filePath, vm); plugin != nil {
+			pm.registerPlugin(plugin)
 		}
 	}
 
@@ -178,27 +191,48 @@ func (pm *PluginManager) loadFile(filePath string) error {
 
 // parsePlugin 解析 goja.Value 为 Plugin
 func (pm *PluginManager) parsePlugin(value goja.Value, filePath string, vm *goja.Runtime) *Plugin {
-	obj := value.ToObject(vm)
-
-	name := obj.Get("name").ToString().String()
-	if name == "" {
-		log.Printf("[plugin] plugin name is empty in %s", filePath)
+	if goja.IsUndefined(value) || goja.IsNull(value) {
+		log.Printf("[plugin] value is undefined/null in %s", filePath)
 		return nil
 	}
 
-	description := obj.Get("description").ToString().String()
+	obj := value.ToObject(vm)
+	if obj == nil {
+		log.Printf("[plugin] object is nil in %s", filePath)
+		return nil
+	}
+
+	nameValue := obj.Get("name")
+	if nameValue == nil || goja.IsUndefined(nameValue) || goja.IsNull(nameValue) {
+		log.Printf("[plugin] name is undefined/null in %s", filePath)
+		return nil
+	}
+	name := nameValue.ToString().String()
+	if name == "" {
+		log.Printf("[plugin] name is empty in %s", filePath)
+		return nil
+	}
+
+	descriptionValue := obj.Get("description")
+	var description string
+	if descriptionValue != nil && !goja.IsUndefined(descriptionValue) && !goja.IsNull(descriptionValue) {
+		description = descriptionValue.ToString().String()
+	}
 
 	var inputSchema map[string]interface{}
-	if v := obj.Get("inputSchema"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
-		if m, ok := v.ToObject(vm).Export().(map[string]interface{}); ok {
-			inputSchema = m
+	inputSchemaValue := obj.Get("inputSchema")
+	if inputSchemaValue != nil && !goja.IsUndefined(inputSchemaValue) && !goja.IsNull(inputSchemaValue) {
+		if inputObj := inputSchemaValue.ToObject(vm); inputObj != nil {
+			if m, ok := inputObj.Export().(map[string]interface{}); ok {
+				inputSchema = m
+			}
 		}
 	}
 
-	// 获取 execute 函数
 	var executeFn func(params interface{}) (interface{}, error)
-	if v := obj.Get("execute"); !goja.IsUndefined(v) && !goja.IsNull(v) {
-		if fn, ok := goja.AssertFunction(v); ok {
+	executeValue := obj.Get("execute")
+	if executeValue != nil && !goja.IsUndefined(executeValue) && !goja.IsNull(executeValue) {
+		if fn, ok := goja.AssertFunction(executeValue); ok {
 			executeFn = func(params interface{}) (interface{}, error) {
 				result, err := fn(goja.Undefined(), vm.ToValue(params))
 				if err != nil {
@@ -308,8 +342,8 @@ func (pm *PluginManager) Call(name string, params interface{}) (interface{}, err
 func (pm *PluginManager) watch() error {
 	pm.watcher = make(chan notify.EventInfo, 100)
 
-	// 递归监控，使用 "..." 语法
-	watchPath := fmt.Sprintf("%s/...", pm.dir)
+	pluginsDir, _ := pm.cfg.Get("server.plugins-dir")
+	watchPath := fmt.Sprintf("%s/...", pluginsDir.String())
 	if err := notify.Watch(watchPath, pm.watcher, notify.All); err != nil {
 		return fmt.Errorf("notify watch failed: %w", err)
 	}

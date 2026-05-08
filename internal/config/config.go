@@ -11,7 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Config struct {
+// ConfigManager 配置管理结构体
+//
+// 提供 YAML 配置文件的加载、监听、访问和关闭功能
+type ConfigManager struct {
 	path        string
 	data        map[string]interface{}
 	watcherChan chan notify.EventInfo
@@ -21,8 +24,8 @@ type Config struct {
 	closeMu     sync.Mutex
 }
 
-func New(path string) (*Config, error) {
-	c := &Config{path: path}
+func New(path string) (*ConfigManager, error) {
+	c := &ConfigManager{path: path}
 	if err := c.load(); err != nil {
 		return nil, err
 	}
@@ -32,7 +35,7 @@ func New(path string) (*Config, error) {
 	return c, nil
 }
 
-func (c *Config) load() error {
+func (c *ConfigManager) load() error {
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		return fmt.Errorf("read config file failed: %w", err)
@@ -49,7 +52,7 @@ func (c *Config) load() error {
 	return nil
 }
 
-func (c *Config) watch() error {
+func (c *ConfigManager) watch() error {
 	c.watcherChan = make(chan notify.EventInfo, 100)
 
 	if err := notify.Watch(c.path, c.watcherChan, notify.All); err != nil {
@@ -60,7 +63,7 @@ func (c *Config) watch() error {
 	return nil
 }
 
-func (c *Config) watchLoop() {
+func (c *ConfigManager) watchLoop() {
 	for {
 		select {
 		case event, ok := <-c.watcherChan:
@@ -79,7 +82,7 @@ func (c *Config) watchLoop() {
 	}
 }
 
-func (c *Config) Get(name string) (*Value, bool) {
+func (c *ConfigManager) Get(name string) (*Value, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -101,7 +104,7 @@ func (c *Config) Get(name string) (*Value, bool) {
 	return &Value{}, false
 }
 
-func (c *Config) Close() error {
+func (c *ConfigManager) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 
