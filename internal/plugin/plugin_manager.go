@@ -15,25 +15,38 @@ import (
 
 // PluginManager 是插件管理器
 type PluginManager struct {
-	dir      string
-	maxDepth int
-	plugins  map[string]*Plugin
-	paths    map[string]string
-	runtime  *goja.Runtime
-	registry *require.Registry
-	watcher  chan notify.EventInfo
-	mu       sync.RWMutex
+	dir        string
+	maxDepth   int
+	plugins    map[string]*Plugin
+	paths      map[string]string
+	runtime    *goja.Runtime
+	registry   *require.Registry
+	watcher    chan notify.EventInfo
+	mu         sync.RWMutex
+	events     []eventEntry
+	eventsMu   sync.RWMutex
+	nextID     uintptr
 }
 
 // New 创建 PluginManager 实例
 // dir: 插件目录路径
 // maxDepth: 最大扫描深度
-func New(dir string, maxDepth int) (*PluginManager, error) {
+// callbacks: 可选的回调函数列表
+func New(dir string, maxDepth int, callbacks ...EventCallback) (*PluginManager, error) {
 	pm := &PluginManager{
 		dir:      dir,
 		maxDepth: maxDepth,
 		plugins:  make(map[string]*Plugin),
 		paths:    make(map[string]string),
+	}
+
+	// 注册回调
+	for _, callback := range callbacks {
+		pm.events = append(pm.events, eventEntry{
+			callback: callback,
+			id:       pm.nextID,
+		})
+		pm.nextID++
 	}
 
 	if err := pm.initRuntime(); err != nil {
@@ -214,6 +227,11 @@ func (pm *PluginManager) registerPlugin(plugin *Plugin) {
 	pm.paths[plugin.Name] = plugin.FilePath
 
 	log.Printf("[plugin] registered: %s from %s", plugin.Name, plugin.FilePath)
+
+	pm.emit(PluginEventData{
+		Event:  EventPluginAdd,
+		Plugin: plugin,
+	})
 }
 
 // Plugins 返回所有插件列表
@@ -236,6 +254,44 @@ func (pm *PluginManager) Get(name string) (*Plugin, bool) {
 
 	plugin, ok := pm.plugins[name]
 	return plugin, ok
+}
+
+// AddEventHandler 注册事件回调，返回移除用的 ID
+func (pm *PluginManager) AddEventHandler(callback EventCallback) uintptr {
+	pm.eventsMu.Lock()
+	defer pm.eventsMu.Unlock()
+
+	id := pm.nextID
+	pm.nextID++
+
+	pm.events = append(pm.events, eventEntry{
+		callback: callback,
+		id:       id,
+	})
+
+	return id
+}
+
+// RemoveEventHandler 移除事件回调
+func (pm *PluginManager) RemoveEventHandler(id uintptr) {
+	pm.eventsMu.Lock()
+	defer pm.eventsMu.Unlock()
+
+	for i, entry := range pm.events {
+		if entry.id == id {
+			pm.events = append(pm.events[:i], pm.events[i+1:]...)
+			return
+		}
+	}
+}
+
+// emit 触发事件（内部使用）
+func (pm *PluginManager) emit(data PluginEventData) {
+	pm.eventsMu.RLock()
+	defer pm.eventsMu.RUnlock()
+	for _, entry := range pm.events {
+		entry.callback(data)
+	}
 }
 
 // Call 根据名称调用插件
@@ -295,18 +351,28 @@ func (pm *PluginManager) watchLoop() {
 func (pm *PluginManager) reloadFile(filePath string) error {
 	pm.mu.Lock()
 
-	// 移除旧插件
+	// 移除旧插件，触发删除事件
 	for name, path := range pm.paths {
 		if path == filePath {
+			oldPlugin := pm.plugins[name]
 			delete(pm.plugins, name)
 			delete(pm.paths, name)
+
+			pm.emit(PluginEventData{
+				Event:     EventPluginDelete,
+				OldPlugin: oldPlugin,
+			})
 		}
 	}
 
 	pm.mu.Unlock()
 
 	// 重新加载
-	return pm.loadFile(filePath)
+	if err := pm.loadFile(filePath); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // removePlugin 移除插件
@@ -316,9 +382,15 @@ func (pm *PluginManager) removePlugin(filePath string) {
 
 	for name, path := range pm.paths {
 		if path == filePath {
+			oldPlugin := pm.plugins[name]
 			delete(pm.plugins, name)
 			delete(pm.paths, name)
 			log.Printf("[plugin] removed: %s", name)
+
+			pm.emit(PluginEventData{
+				Event:     EventPluginDelete,
+				OldPlugin: oldPlugin,
+			})
 		}
 	}
 }
@@ -335,6 +407,10 @@ func (pm *PluginManager) Close() error {
 
 	pm.plugins = nil
 	pm.paths = nil
+
+	pm.eventsMu.Lock()
+	pm.events = nil
+	pm.eventsMu.Unlock()
 
 	return nil
 }

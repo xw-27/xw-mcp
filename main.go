@@ -25,8 +25,17 @@ func main() {
 		fmt.Printf("plugins-dir: %s\n", pluginsDir.String())
 	}
 
-	// 测试 plugin 模块
-	pm, err := plugin.New("./plugins", 3)
+	// 测试 plugin 模块 - 通过 New 方法传入回调
+	pm, err := plugin.New("./plugins", 3, func(data plugin.PluginEventData) {
+		switch data.Event {
+		case plugin.EventPluginAdd:
+			fmt.Printf("[Event] Plugin Added: %s\n", data.Plugin.Name)
+		case plugin.EventPluginUpdate:
+			fmt.Printf("[Event] Plugin Updated: %s\n", data.Plugin.Name)
+		case plugin.EventPluginDelete:
+			fmt.Printf("[Event] Plugin Deleted: %s\n", data.OldPlugin.Name)
+		}
+	})
 	if err != nil {
 		log.Fatalf("plugin.New failed: %v", err)
 	}
