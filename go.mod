@@ -3,7 +3,7 @@ module xw-mcp
 go 1.26.2
 
 require (
-	github.com/fsnotify/fsnotify v1.10.1
+	github.com/rjeczalik/notify v0.9.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 

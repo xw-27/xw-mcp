@@ -7,31 +7,20 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/rjeczalik/notify"
 	"gopkg.in/yaml.v3"
 )
 
-// Config 配置管理结构体
-//
-// 提供 YAML 配置文件的加载、监听、访问和关闭功能
 type Config struct {
-	path    string
-	data    map[string]interface{}
-	watcher *fsnotify.Watcher
-	mu      sync.RWMutex
-	once    sync.Once
-	closed  bool
-	closeMu sync.Mutex
+	path        string
+	data        map[string]interface{}
+	watcherChan chan notify.EventInfo
+	mu          sync.RWMutex
+	once        sync.Once
+	closed      bool
+	closeMu     sync.Mutex
 }
 
-// New 创建 Config 实例，加载配置并启动热更新监听
-//
-// 参数:
-//   - path: 配置文件路径
-//
-// 返回:
-//   - *Config: 配置实例
-//   - error: 加载或监听失败时返回错误
 func New(path string) (*Config, error) {
 	c := &Config{path: path}
 	if err := c.load(); err != nil {
@@ -43,7 +32,6 @@ func New(path string) (*Config, error) {
 	return c, nil
 }
 
-// load 从文件加载配置
 func (c *Config) load() error {
 	data, err := os.ReadFile(c.path)
 	if err != nil {
@@ -61,15 +49,10 @@ func (c *Config) load() error {
 	return nil
 }
 
-// watch 启动文件监听
 func (c *Config) watch() error {
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("create watcher failed: %w", err)
-	}
-	c.watcher = w
+	c.watcherChan = make(chan notify.EventInfo, 100)
 
-	if err := w.Add(c.path); err != nil {
+	if err := notify.Watch(c.path, c.watcherChan, notify.All); err != nil {
 		return fmt.Errorf("watch config file failed: %w", err)
 	}
 
@@ -77,15 +60,14 @@ func (c *Config) watch() error {
 	return nil
 }
 
-// watchLoop 文件监听循环
 func (c *Config) watchLoop() {
 	for {
 		select {
-		case event, ok := <-c.watcher.Events:
+		case event, ok := <-c.watcherChan:
 			if !ok {
 				return
 			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Event() == notify.Write {
 				log.Println("[config] config file changed, reloading...")
 				if err := c.load(); err != nil {
 					log.Printf("[config] reload failed: %v", err)
@@ -93,25 +75,10 @@ func (c *Config) watchLoop() {
 					log.Println("[config] reload success")
 				}
 			}
-		case err, ok := <-c.watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("[config] watcher error: %v", err)
 		}
 	}
 }
 
-// Get 根据配置名称获取配置值
-//
-// 支持点号分隔的嵌套路径访问，如 "server.port"
-//
-// 参数:
-//   - name: 配置名称
-//
-// 返回:
-//   - *Value: 配置值包装
-//   - bool: 配置项是否存在
 func (c *Config) Get(name string) (*Value, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -134,12 +101,6 @@ func (c *Config) Get(name string) (*Value, bool) {
 	return &Value{}, false
 }
 
-// Close 关闭配置监听器并清理资源
-//
-// 支持多次调用，线程安全。使用 defer 自动回收。
-//
-// 返回:
-//   - error: 关闭失败时返回错误
 func (c *Config) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
@@ -157,8 +118,8 @@ func (c *Config) Close() error {
 	c.mu.Unlock()
 
 	c.once.Do(func() {
-		if c.watcher != nil {
-			c.watcher.Close()
+		if c.watcherChan != nil {
+			notify.Stop(c.watcherChan)
 		}
 	})
 	return nil
