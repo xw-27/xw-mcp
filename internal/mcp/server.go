@@ -66,6 +66,7 @@ func (s *McpServer) addTool(p *plugin.Plugin) {
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        p.Name,
 		Description: p.Description,
+		InputSchema: p.InputSchema,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input any) (*mcp.CallToolResult, any, error) {
 		result, err := p.Execute(input)
 		if err != nil {
