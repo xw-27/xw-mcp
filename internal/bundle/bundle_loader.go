@@ -101,6 +101,28 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) (err error) {
 	vm.Set("module", moduleObj)
 	vm.Set("exports", exportsObj)
 
+	// 设置 require 函数（支持相对路径导入）
+	vm.Set("require", func(modulePath string) interface{} {
+		fullPath := filepath.Join(b.Path(), modulePath)
+		if !strings.HasSuffix(fullPath, ".js") {
+			fullPath += ".js"
+		}
+
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			panic(fmt.Errorf("require '%s' failed: %w", modulePath, err))
+		}
+
+		_, err = vm.RunString(string(content))
+		if err != nil {
+			panic(fmt.Errorf("require '%s' execute failed: %w", modulePath, err))
+		}
+
+		moduleVal := vm.Get("module").ToObject(vm)
+		exportsVal := moduleVal.Get("exports")
+		return exportsVal.Export()
+	})
+
 	// 在Runtime中执行JS
 	_, err = vm.RunString(string(content))
 	if err != nil {
