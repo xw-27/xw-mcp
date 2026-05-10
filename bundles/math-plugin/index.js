@@ -1,6 +1,6 @@
 module.exports = [
     {
-        type: 'tool',
+        type: 'tool2',
         name: 'add',
         description: '两个数字相加',
         inputSchema: {

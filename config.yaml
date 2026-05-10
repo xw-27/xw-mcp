@@ -1,4 +1,5 @@
 # 配置文件
 server:
-  port: 8080
-  plugins-dir: "./plugins"
+  port: 8080                      # MCP Server HTTP 端口
+  bundle-dir: "bundles"            # 插件目录路径
+  watch-depth: 3                   # 文件监控深度

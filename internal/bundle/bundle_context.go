@@ -10,8 +10,9 @@ import (
 type BundleContext struct {
 	*BundleWatcher  // 嵌入Watcher（监控文件变化）
 	*BundleLoader    // 嵌入Loader（加载Bundle）
-	mu      sync.RWMutex
-	bundles map[string]*Bundle         // Bundle集合（name -> Bundle）
+	mu                sync.RWMutex
+	bundles           map[string]*Bundle         // Bundle集合（name -> Bundle）
+	afterLoadCallbacks []func(*BundleContext)   // 加载完成回调列表
 }
 
 // NewBundleContext 创建新的BundleContext实例
@@ -48,6 +49,9 @@ func (c *BundleContext) initCallbacks() {
 			bundle.UnlockLoad()
 			c.logBundleInfo(bundle)
 
+			// 触发 AfterLoad 回调，通知外部（如 MCP Server）重载完成
+			c.triggerAfterLoad()
+
 		case BundleEventUnload:
 			bundle, exists := c.Get(event.BundleName)
 			if exists {
@@ -57,6 +61,27 @@ func (c *BundleContext) initCallbacks() {
 			}
 		}
 	})
+}
+
+// triggerAfterLoad 触发所有 AfterLoad 回调
+// 在 MetaLoad 成功后调用，通知外部 bundle 已重载完成
+func (c *BundleContext) triggerAfterLoad() {
+	c.mu.RLock()
+	callbacks := c.afterLoadCallbacks
+	c.mu.RUnlock()
+
+	for _, cb := range callbacks {
+		cb(c)
+	}
+}
+
+// AfterLoad 注册加载完成回调
+// 当任意 bundle 完成 MetaLoad 时，所有注册的回调都会被触发
+// 用于通知外部系统（如 MCP Server）重新加载所有 actions
+func (c *BundleContext) AfterLoad(callback func(*BundleContext)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.afterLoadCallbacks = append(c.afterLoadCallbacks, callback)
 }
 
 // logBundleInfo 打印Bundle详细信息

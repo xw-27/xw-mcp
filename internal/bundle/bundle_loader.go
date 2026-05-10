@@ -197,11 +197,17 @@ func (l *BundleLoader) parseToolAction(vm *goja.Runtime, obj *goja.Object, b *Bu
 		executeVal := obj.Get("execute")
 		if !goja.IsUndefined(executeVal) && !goja.IsNull(executeVal) {
 			if fn, ok := goja.AssertFunction(executeVal); ok {
+				log.Printf("[bundle] binding execute function for tool: %s", name)
 				tool.Execute = func(params interface{}) (interface{}, error) {
-					result, err := fn(goja.Undefined(), vm.ToValue(params))
+					log.Printf("[bundle] execute tool: %s, params type=%T, params=%v", name, params, params)
+					jsParams := vm.ToValue(params)
+					log.Printf("[bundle] execute tool: %s, jsParams type=%T, jsParams=%v", name, jsParams, jsParams)
+					result, err := fn(goja.Undefined(), jsParams)
 					if err != nil {
+						log.Printf("[bundle] execute tool error: %s, error=%v", name, err)
 						return nil, err
 					}
+					log.Printf("[bundle] execute tool result: %s, result=%v", name, result.Export())
 					return result.Export(), nil
 				}
 			}
