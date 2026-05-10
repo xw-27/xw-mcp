@@ -17,6 +17,8 @@ module.exports = {
         required: ['values']
     },
     execute: function(params) {
-        return { result: Math.max.apply(null, params.values) };
+        const result = Math.max.apply(null, params.values);
+        log.info(`max called: max([${params.values}]) = ${result}`);
+        return { result: result };
     }
 }

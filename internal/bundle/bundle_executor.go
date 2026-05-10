@@ -18,7 +18,9 @@ import (
 // 1. 解析 actionID 获取 bundleName 和 actionName
 // 2. 获取 bundle 实例
 // 3. 如果 bundle 未 FullLoad，先进行 FullLoad（绑定 execute 函数）
-// 4. 根据 actionType 调用对应的 action Execute 方法
+// 4. 加锁防止并发执行导致资源销毁问题
+// 5. 根据 actionType 调用对应的 action Execute 方法
+// 6. 执行完成后销毁资源
 //
 // 返回值：
 //   - 成功: (interface{}, nil)
@@ -54,6 +56,11 @@ func (c *BundleContext) DoAction(actionType, actionID string, params interface{}
 		bundle.UnlockLoad()
 	}
 
+	// 加锁：防止并发执行导致资源销毁问题
+	bundle.doActionMu.Lock()
+	defer bundle.doActionMu.Unlock()
+
+	var result interface{}
 	switch actionType {
 	case ActionTypeTool:
 		tool, ok := bundle.GetTool(actionName)
@@ -62,38 +69,44 @@ func (c *BundleContext) DoAction(actionType, actionID string, params interface{}
 			return nil, ErrActionNotFound
 		}
 		log.Printf("[bundle] DoAction: executing tool, actionName=%s, params=%v", actionName, params)
-		result, err := tool.Execute(params)
+		result, err = tool.Execute(params)
 		if err != nil {
 			log.Printf("[bundle] DoAction: tool execution failed, actionName=%s, error=%v", actionName, err)
 		} else {
 			log.Printf("[bundle] DoAction: tool execution success, actionName=%s, result=%v", actionName, result)
 		}
-		return result, err
 	case ActionTypePrompt:
 		prompt, ok := bundle.GetPrompt(actionName)
 		if !ok {
 			log.Printf("[bundle] DoAction: prompt not found, actionName=%s", actionName)
 			return nil, ErrActionNotFound
 		}
-		return prompt.Execute(params)
+		result, err = prompt.Execute(params)
 	case ActionTypeResource:
 		resource, ok := bundle.GetResource(actionName)
 		if !ok {
 			log.Printf("[bundle] DoAction: resource not found, actionName=%s", actionName)
 			return nil, ErrActionNotFound
 		}
-		return resource.Execute(params)
+		result, err = resource.Execute(params)
 	case ActionTypeResourceTemplate:
 		template, ok := bundle.GetTemplate(actionName)
 		if !ok {
 			log.Printf("[bundle] DoAction: template not found, actionName=%s", actionName)
 			return nil, ErrActionNotFound
 		}
-		return template.Execute(params)
+		result, err = template.Execute(params)
 	default:
 		log.Printf("[bundle] DoAction: invalid action type, actionType=%s", actionType)
 		return nil, ErrInvalidActionType
 	}
+
+	// 执行完成后销毁资源
+	if bundle.lifecycleManager != nil {
+		bundle.lifecycleManager.DestroyAll()
+	}
+
+	return result, err
 }
 
 // parseActionID 解析 action ID

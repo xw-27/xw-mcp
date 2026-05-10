@@ -17,7 +17,9 @@ module.exports = {
         required: ['value']
     },
     execute: function(params) {
-        var multiplier = Math.pow(10, params.decimals || 0);
-        return { result: Math.round(params.value * multiplier) / multiplier };
+        const multiplier = Math.pow(10, params.decimals || 0);
+        const result = Math.round(params.value * multiplier) / multiplier;
+        log.info(`round called: round(${params.value}, ${params.decimals || 0}) = ${result}`);
+        return { result: result };
     }
 }

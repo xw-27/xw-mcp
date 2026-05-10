@@ -17,6 +17,8 @@ module.exports = {
         required: ['base', 'exponent']
     },
     execute: function(params) {
-        return { result: Math.pow(params.base, params.exponent) };
+        const result = Math.pow(params.base, params.exponent);
+        log.info(`power called: ${params.base} ^ ${params.exponent} = ${result}`);
+        return { result: result };
     }
 }

@@ -5,6 +5,8 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/require"
+
+	"xw-mcp/internal/actionsdk"
 )
 
 // LoadState Bundle加载状态
@@ -12,10 +14,12 @@ type LoadState int
 
 // LoadState 常量定义
 const (
-	LoadStateNone LoadState = iota  // 未加载
-	LoadStateMeta                    // 半加载（只解析元数据）
-	LoadStateFull                    // 全加载（完整加载）
-	LoadStateError                   // 加载失败
+	LoadStateNone LoadState = iota // 未加载
+	LoadStateMeta                  // 半加载（只解析元数据）
+	LoadStateFull                  // 全加载（完整加载）
+	LoadStateSuspended            // 挂起（lifecycleManager已销毁，可唤醒）
+	LoadStateClosed               // 关闭（不可唤醒，需重新创建）
+	LoadStateError                // 加载失败
 )
 
 // Bundle 插件项目单元，每个Bundle拥有独立的Runtime和ActionRegistry
@@ -31,17 +35,21 @@ type Bundle struct {
 	mu             sync.RWMutex    // 读写锁（保护 loadState/loadError）
 	loadMu         sync.Mutex      // 加载互斥锁（防止 Load/Unload 并发）
 	requireRegistry *require.Registry // 模块注册表（用于重置Runtime）
+	moduleReg      *require.RequireModule // 模块注册（用于 native module 加载）
+	lifecycleManager *actionsdk.LifecycleManager // SDK 生命周期管理器
+	doActionMu     sync.Mutex      // DoAction 执行锁（防止并发执行导致资源销毁问题）
 }
 
 // NewBundle 创建新的Bundle实例
 func NewBundle(name, path string) *Bundle {
 	return &Bundle{
-		name:      name,
-		path:      path,
-		indexFile: "index.js",
-		registry:  NewActionRegistry(),
-		enabled:   true,
-		loadState: LoadStateNone,
+		name:             name,
+		path:             path,
+		indexFile:        "index.js",
+		registry:         NewActionRegistry(),
+		enabled:          true,
+		loadState:        LoadStateNone,
+		lifecycleManager: actionsdk.NewLifecycleManager(),
 	}
 }
 
@@ -84,10 +92,14 @@ func (b *Bundle) SetIndexFile(filename string) {
 func (b *Bundle) initRuntime() error {
 	vm := goja.New()
 	reg := require.NewRegistry()
-	reg.Enable(vm)
+	b.moduleReg = reg.Enable(vm)
 
 	b.runtime = vm
 	b.requireRegistry = reg
+
+	// 注册 SDK 模块到 VM 全局（log 等）
+	b.lifecycleManager.RegisterAllModules(vm)
+
 	return nil
 }
 
@@ -144,7 +156,7 @@ func (b *Bundle) UnlockLoad() {
 	b.loadMu.Unlock()
 }
 
-// Close 关闭Bundle，释放资源
+// Close 关闭Bundle，释放资源，状态标记为Closed
 func (b *Bundle) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -152,10 +164,39 @@ func (b *Bundle) Close() error {
 	if b.runtime != nil {
 		b.runtime = nil
 	}
+	if b.lifecycleManager != nil {
+		b.lifecycleManager.DestroyAll()
+		b.lifecycleManager = nil
+	}
 	b.registry.Clear()
-	b.loadState = LoadStateNone
+	b.loadState = LoadStateClosed
 	b.loadError = nil
 	return nil
+}
+
+// Suspend 挂起Bundle，销毁lifecycleManager，保留runtime供后续唤醒使用
+// 与Close的区别：保留runtime和registry，仅销毁lifecycleManager，最终状态为Suspended
+func (b *Bundle) Suspend() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.lifecycleManager != nil {
+		b.lifecycleManager.DestroyAll()
+		b.lifecycleManager = nil
+	}
+	b.loadState = LoadStateSuspended
+}
+
+// Wake 唤醒挂起的Bundle，重新创建lifecycleManager
+// 仅在状态为LoadStateSuspended时有效
+func (b *Bundle) Wake() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.loadState == LoadStateSuspended {
+		b.lifecycleManager = actionsdk.NewLifecycleManager()
+		b.loadState = LoadStateNone
+	}
 }
 
 // RegisterTool 注册工具到当前Bundle

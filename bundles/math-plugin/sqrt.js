@@ -14,8 +14,11 @@ module.exports = {
     },
     execute: function(params) {
         if (params.value < 0) {
+            log.warn(`sqrt called with negative value: ${params.value}`);
             return { error: '负数不能开平方根' };
         }
-        return { result: Math.sqrt(params.value) };
+        const result = Math.sqrt(params.value);
+        log.info(`sqrt called: sqrt(${params.value}) = ${result}`);
+        return { result: result };
     }
 }

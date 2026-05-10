@@ -17,6 +17,8 @@ module.exports = {
         required: ['multiplicand', 'multiplier']
     },
     execute: function(params) {
-        return { result: params.multiplicand * params.multiplier };
+        const result = params.multiplicand * params.multiplier;
+        log.info(`multiply called: ${params.multiplicand} * ${params.multiplier} = ${result}`);
+        return { result: result };
     }
 }

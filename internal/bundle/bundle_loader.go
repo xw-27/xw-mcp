@@ -69,9 +69,9 @@ func (l *BundleLoader) MetaLoad(b *Bundle) error {
 	return nil
 }
 
-// Unload 卸载：清空Bundle的Registry，重置Runtime，重置加载状态
+// Unload 卸载：挂起Bundle，保留runtime供后续唤醒使用
 func (l *BundleLoader) Unload(b *Bundle) {
-	b.Close()
+	b.Suspend()
 	log.Printf("[bundle] unloaded: %s", b.Name())
 }
 
@@ -84,8 +84,17 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) (err error) {
 		}
 	}()
 
+	// 唤醒挂起的Bundle（重建lifecycleManager）
+	b.Wake()
+
 	// 获取Bundle的Runtime
 	vm := b.GetRuntime()
+
+	// 重置 lifecycleManager 状态
+	if b.lifecycleManager != nil {
+		b.lifecycleManager.DestroyAll()
+	}
+	vm.Set("__lifecycleManager", b.lifecycleManager)
 
 	// 读取index.js内容
 	indexPath := filepath.Join(b.Path(), b.IndexFile())
@@ -101,7 +110,7 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) (err error) {
 	vm.Set("module", moduleObj)
 	vm.Set("exports", exportsObj)
 
-	// 设置 require 函数（支持相对路径导入）
+	// 设置 require 函数（仅文件路径）
 	vm.Set("require", func(modulePath string) interface{} {
 		fullPath := filepath.Join(b.Path(), modulePath)
 		if !strings.HasSuffix(fullPath, ".js") {

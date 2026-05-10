@@ -17,6 +17,8 @@ module.exports = {
         required: ['values']
     },
     execute: function(params) {
-        return { result: Math.min.apply(null, params.values) };
+        const result = Math.min.apply(null, params.values);
+        log.info(`min called: min([${params.values}]) = ${result}`);
+        return { result: result };
     }
 }

@@ -17,6 +17,8 @@ module.exports = {
         required: ['minuend', 'subtrahend']
     },
     execute: function(params) {
-        return { result: params.minuend - params.subtrahend };
+        const result = params.minuend - params.subtrahend;
+        log.info(`subtract called: ${params.minuend} - ${params.subtrahend} = ${result}`);
+        return { result: result };
     }
 }

@@ -13,6 +13,8 @@ module.exports = {
         required: ['value']
     },
     execute: function(params) {
-        return { result: Math.abs(params.value) };
+        const result = Math.abs(params.value);
+        log.info(`abs called: |${params.value}| = ${result}`);
+        return { result: result };
     }
 }

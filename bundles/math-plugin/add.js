@@ -17,6 +17,8 @@ module.exports = {
         required: ['augend', 'addend']
     },
     execute: function(params) {
-        return { result: params.augend + params.addend };
+        const result = params.augend + params.addend;
+        log.info(`add called: ${params.augend} + ${params.addend} = ${result}`);
+        return { result: result };
     }
 }
