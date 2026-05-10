@@ -4,13 +4,12 @@ import (
 	"flag"
 	"log"
 
+	"xw-mcp/internal/bundle"
 	"xw-mcp/internal/config"
 	"xw-mcp/internal/mcp"
-	"xw-mcp/internal/plugin"
 )
 
 func main() {
-	// 解析命令行参数
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
 
@@ -20,13 +19,19 @@ func main() {
 	}
 	defer cfg.Close()
 
-	pm, err := plugin.New(cfg, 3)
-	if err != nil {
-		log.Fatalf("plugin.New failed: %v", err)
-	}
-	defer pm.Close()
+	bundleCtx := bundle.NewBundleContext()
+	defer bundleCtx.Close()
 
-	server := mcp.New(pm, cfg)
+	bundlesPath := "bundles"
+	if pathVal, ok := cfg.Get("bundles.path"); ok {
+		bundlesPath = pathVal.String()
+	}
+
+	if err := bundleCtx.StartWatcher(bundlesPath, 2); err != nil {
+		log.Fatalf("bundleCtx.StartWatcher failed: %v", err)
+	}
+
+	server := mcp.New(bundleCtx, cfg)
 	defer server.Close()
 
 	if err := server.Run(); err != nil {
