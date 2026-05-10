@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dop251/goja"
 )
@@ -18,12 +19,28 @@ func NewBundleLoader() *BundleLoader {
 	return &BundleLoader{}
 }
 
+// validateBundleName 验证bundle名称是否合法
+func (l *BundleLoader) validateBundleName(name string) error {
+	if strings.Contains(name, " ") {
+		return fmt.Errorf("bundle name '%s' contains spaces", name)
+	}
+	return nil
+}
+
 // FullLoad 全量加载：解析所有Action元数据 + 绑定函数
 // 执行index.js，提取完整的Action信息，包括execute/read函数绑定
 func (l *BundleLoader) FullLoad(b *Bundle) error {
-	l.Unload(b) // 先完整卸载，重置Runtime和状态
+	if err := l.validateBundleName(b.Name()); err != nil {
+		b.SetLoadState(LoadStateError)
+		b.SetLoadError(err)
+		log.Printf("[bundle] full load failed: %s, error: %v", b.Name(), err)
+		return err
+	}
+	l.Unload(b)
 	err := l.loadBundle(b, true)
 	if err != nil {
+		b.SetLoadState(LoadStateError)
+		b.SetLoadError(err)
 		log.Printf("[bundle] full load failed: %s, error: %v", b.Name(), err)
 		return err
 	}
@@ -34,9 +51,17 @@ func (l *BundleLoader) FullLoad(b *Bundle) error {
 // MetaLoad 半加载：只解析Action元数据
 // 执行index.js，只提取name/description/type/schema等信息，不绑定函数
 func (l *BundleLoader) MetaLoad(b *Bundle) error {
-	l.Unload(b) // 先完整卸载，重置Runtime和状态
+	if err := l.validateBundleName(b.Name()); err != nil {
+		b.SetLoadState(LoadStateError)
+		b.SetLoadError(err)
+		log.Printf("[bundle] meta load failed: %s, error: %v", b.Name(), err)
+		return err
+	}
+	l.Unload(b)
 	err := l.loadBundle(b, false)
 	if err != nil {
+		b.SetLoadState(LoadStateError)
+		b.SetLoadError(err)
 		log.Printf("[bundle] meta load failed: %s, error: %v", b.Name(), err)
 		return err
 	}
@@ -46,15 +71,19 @@ func (l *BundleLoader) MetaLoad(b *Bundle) error {
 
 // Unload 卸载：清空Bundle的Registry，重置Runtime，重置加载状态
 func (l *BundleLoader) Unload(b *Bundle) {
-	b.Registry().Clear()
-	b.ResetRuntime() // 重置Runtime，避免模块缓存累积
-	b.SetLoadState(LoadStateNone)
+	b.Close()
 	log.Printf("[bundle] unloaded: %s", b.Name())
 }
 
 // loadBundle 内部加载方法
 // fullLoad为true时绑定execute/read函数，为false时只解析元数据
-func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) error {
+func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during load: %v", r)
+		}
+	}()
+
 	// 获取Bundle的Runtime
 	vm := b.GetRuntime()
 
@@ -65,6 +94,13 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) error {
 		return fmt.Errorf("read index.js failed: %w", err)
 	}
 
+	// 设置CommonJS模块环境（module.exports等）
+	moduleObj := vm.NewObject()
+	exportsObj := vm.NewObject()
+	moduleObj.Set("exports", exportsObj)
+	vm.Set("module", moduleObj)
+	vm.Set("exports", exportsObj)
+
 	// 在Runtime中执行JS
 	_, err = vm.RunString(string(content))
 	if err != nil {
@@ -72,14 +108,14 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) error {
 	}
 
 	// 获取module.exports
-	module := vm.Get("module").ToObject(vm)
-	exports := module.Get("exports")
-	if goja.IsUndefined(exports) || goja.IsNull(exports) {
+	moduleVal := vm.Get("module").ToObject(vm)
+	exportsVal := moduleVal.Get("exports")
+	if goja.IsUndefined(exportsVal) || goja.IsNull(exportsVal) {
 		return fmt.Errorf("module.exports is empty")
 	}
 
 	// 转换为对象
-	exportsObj := exports.ToObject(vm)
+	exportsObj = exportsVal.ToObject(vm)
 	var items []goja.Value
 
 	// 判断是数组还是单个对象
@@ -89,7 +125,7 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) error {
 			items = append(items, exportsObj.Get(fmt.Sprintf("%d", i)))
 		}
 	} else {
-		items = []goja.Value{exports}
+		items = []goja.Value{exportsVal}
 	}
 
 	// 遍历并解析每个条目
@@ -108,14 +144,14 @@ func (l *BundleLoader) loadBundle(b *Bundle, fullLoad bool) error {
 		if goja.IsUndefined(typeVal) || goja.IsNull(typeVal) {
 			continue
 		}
-		actionType := typeVal.String()
+		actionType := typeVal.ToString().String()
 
 		// 根据type分发解析
 		switch actionType {
 		case ActionTypeTool:
 			l.parseToolAction(vm, obj, b, fullLoad)
 		case ActionTypePrompt:
-			l.parsePromptAction(vm, obj, b)
+			l.parsePromptAction(vm, obj, b, fullLoad)
 		case ActionTypeResource:
 			l.parseResourceAction(vm, obj, b, fullLoad)
 		case ActionTypeResourceTemplate:
@@ -176,7 +212,7 @@ func (l *BundleLoader) parseToolAction(vm *goja.Runtime, obj *goja.Object, b *Bu
 }
 
 // parsePromptAction 解析PromptAction
-func (l *BundleLoader) parsePromptAction(vm *goja.Runtime, obj *goja.Object, b *Bundle) {
+func (l *BundleLoader) parsePromptAction(vm *goja.Runtime, obj *goja.Object, b *Bundle, fullLoad bool) {
 	name := obj.Get("name").String()
 	description := obj.Get("description").String()
 
@@ -228,6 +264,22 @@ func (l *BundleLoader) parsePromptAction(vm *goja.Runtime, obj *goja.Object, b *
 		Messages:  messages,
 	}
 
+	// 如果是全加载，绑定execute函数
+	if fullLoad {
+		executeVal := obj.Get("execute")
+		if !goja.IsUndefined(executeVal) && !goja.IsNull(executeVal) {
+			if fn, ok := goja.AssertFunction(executeVal); ok {
+				prompt.Execute = func(params interface{}) (interface{}, error) {
+					result, err := fn(goja.Undefined(), vm.ToValue(params))
+					if err != nil {
+						return nil, err
+					}
+					return result.Export(), nil
+				}
+			}
+		}
+	}
+
 	b.RegisterPrompt(prompt)
 }
 
@@ -248,33 +300,16 @@ func (l *BundleLoader) parseResourceAction(vm *goja.Runtime, obj *goja.Object, b
 		MIMEType: mimeType,
 	}
 
-	// 如果是全加载，绑定read函数
 	if fullLoad {
-		readVal := obj.Get("read")
-		if !goja.IsUndefined(readVal) && !goja.IsNull(readVal) {
-			if fn, ok := goja.AssertFunction(readVal); ok {
-				resource.Read = func(uri string) (*ResourceContents, error) {
-					result, err := fn(goja.Undefined(), vm.ToValue(uri))
+		executeVal := obj.Get("execute")
+		if !goja.IsUndefined(executeVal) && !goja.IsNull(executeVal) {
+			if fn, ok := goja.AssertFunction(executeVal); ok {
+				resource.Execute = func(params interface{}) (interface{}, error) {
+					result, err := fn(goja.Undefined(), vm.ToValue(params))
 					if err != nil {
 						return nil, err
 					}
-					if obj, ok := result.Export().(map[string]interface{}); ok {
-						rc := &ResourceContents{}
-						if uri, ok := obj["uri"].(string); ok {
-							rc.URI = uri
-						}
-						if mime, ok := obj["mimeType"].(string); ok {
-							rc.MIMEType = mime
-						}
-						if text, ok := obj["text"].(string); ok {
-							rc.Text = text
-						}
-						if blob, ok := obj["blob"].([]byte); ok {
-							rc.Blob = blob
-						}
-						return rc, nil
-					}
-					return nil, fmt.Errorf("invalid resource contents")
+					return result.Export(), nil
 				}
 			}
 		}
@@ -300,33 +335,16 @@ func (l *BundleLoader) parseResourceTemplateAction(vm *goja.Runtime, obj *goja.O
 		MIMEType:    mimeType,
 	}
 
-	// 如果是全加载，绑定read函数
 	if fullLoad {
-		readVal := obj.Get("read")
-		if !goja.IsUndefined(readVal) && !goja.IsNull(readVal) {
-			if fn, ok := goja.AssertFunction(readVal); ok {
-				template.Read = func(uri string) (*ResourceContents, error) {
-					result, err := fn(goja.Undefined(), vm.ToValue(uri))
+		executeVal := obj.Get("execute")
+		if !goja.IsUndefined(executeVal) && !goja.IsNull(executeVal) {
+			if fn, ok := goja.AssertFunction(executeVal); ok {
+				template.Execute = func(params interface{}) (interface{}, error) {
+					result, err := fn(goja.Undefined(), vm.ToValue(params))
 					if err != nil {
 						return nil, err
 					}
-					if obj, ok := result.Export().(map[string]interface{}); ok {
-						rc := &ResourceContents{}
-						if uri, ok := obj["uri"].(string); ok {
-							rc.URI = uri
-						}
-						if mime, ok := obj["mimeType"].(string); ok {
-							rc.MIMEType = mime
-						}
-						if text, ok := obj["text"].(string); ok {
-							rc.Text = text
-						}
-						if blob, ok := obj["blob"].([]byte); ok {
-							rc.Blob = blob
-						}
-						return rc, nil
-					}
-					return nil, fmt.Errorf("invalid resource contents")
+					return result.Export(), nil
 				}
 			}
 		}

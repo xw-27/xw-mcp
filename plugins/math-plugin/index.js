@@ -1,5 +1,6 @@
 module.exports = [
     {
+        type: 'tool',
         name: 'add',
         description: '两个数字相加',
         inputSchema: {
@@ -21,6 +22,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'subtract',
         description: '两个数字相减',
         inputSchema: {
@@ -42,6 +44,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'multiply',
         description: '两个数字相乘',
         inputSchema: {
@@ -63,6 +66,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'divide',
         description: '两个数字相除',
         inputSchema: {
@@ -87,6 +91,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'power',
         description: '计算幂运算',
         inputSchema: {
@@ -108,6 +113,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'sqrt',
         description: '计算平方根',
         inputSchema: {
@@ -128,6 +134,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'abs',
         description: '计算绝对值',
         inputSchema: {
@@ -145,6 +152,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'max',
         description: '返回一组数字中的最大值',
         inputSchema: {
@@ -166,6 +174,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'min',
         description: '返回一组数字中的最小值',
         inputSchema: {
@@ -187,6 +196,7 @@ module.exports = [
         }
     },
     {
+        type: 'tool',
         name: 'round',
         description: '对数字进行四舍五入',
         inputSchema: {

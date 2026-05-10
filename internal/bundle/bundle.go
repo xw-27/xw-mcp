@@ -15,6 +15,7 @@ const (
 	LoadStateNone LoadState = iota  // 未加载
 	LoadStateMeta                    // 半加载（只解析元数据）
 	LoadStateFull                    // 全加载（完整加载）
+	LoadStateError                   // 加载失败
 )
 
 // Bundle 插件项目单元，每个Bundle拥有独立的Runtime和ActionRegistry
@@ -26,7 +27,9 @@ type Bundle struct {
 	registry       *ActionRegistry // 动作注册表
 	enabled        bool            // 是否启用
 	loadState      LoadState       // 当前加载状态
-	mu             sync.RWMutex    // 读写锁
+	loadError      error           // 加载错误信息
+	mu             sync.RWMutex    // 读写锁（保护 loadState/loadError）
+	loadMu         sync.Mutex      // 加载互斥锁（防止 Load/Unload 并发）
 	requireRegistry *require.Registry // 模块注册表（用于重置Runtime）
 }
 
@@ -117,6 +120,30 @@ func (b *Bundle) SetLoadState(state LoadState) {
 	b.loadState = state
 }
 
+// LoadError 获取加载错误信息
+func (b *Bundle) LoadError() error {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.loadError
+}
+
+// SetLoadError 设置加载错误信息
+func (b *Bundle) SetLoadError(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.loadError = err
+}
+
+// LockLoad 获取加载互斥锁
+func (b *Bundle) LockLoad() {
+	b.loadMu.Lock()
+}
+
+// UnlockLoad 释放加载互斥锁
+func (b *Bundle) UnlockLoad() {
+	b.loadMu.Unlock()
+}
+
 // Close 关闭Bundle，释放资源
 func (b *Bundle) Close() error {
 	b.mu.Lock()
@@ -127,6 +154,7 @@ func (b *Bundle) Close() error {
 	}
 	b.registry.Clear()
 	b.loadState = LoadStateNone
+	b.loadError = nil
 	return nil
 }
 

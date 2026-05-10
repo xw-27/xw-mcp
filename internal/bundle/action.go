@@ -32,39 +32,37 @@ type ResourceContents struct {
 
 // BaseAction 所有Action的基类
 type BaseAction struct {
-	Type        string  // Action类型常量
-	Name        string  // 动作名称（唯一标识）
-	Description string  // 动作描述
+	Type        string                           // Action类型常量
+	Name        string                           // 动作名称（唯一标识）
+	Description string                          // 动作描述
+	Execute     func(params interface{}) (interface{}, error)  // 执行函数
 }
 
 // ToolAction 工具动作
 type ToolAction struct {
-	BaseAction  // 嵌入基类
-	InputSchema map[string]interface{}         // 输入参数Schema
-	Execute     func(params interface{}) (interface{}, error)  // 执行函数
+	BaseAction  // 嵌入基类（含 Execute）
+	InputSchema map[string]interface{}  // 输入参数Schema
 }
 
 // PromptAction 提示词动作
 type PromptAction struct {
-	BaseAction  // 嵌入基类
+	BaseAction  // 嵌入基类（含 Execute）
 	Arguments   []*PromptArgument  // 参数列表
 	Messages    []*PromptMessage  // 消息模板列表
 }
 
 // ResourceAction 资源动作
 type ResourceAction struct {
-	BaseAction  // 嵌入基类
-	URI         string                                // 资源URI
-	MIMEType    string                                // MIME类型
-	Read        func(uri string) (*ResourceContents, error)  // 读取函数
+	BaseAction  // 嵌入基类（含 Execute）
+	URI         string  // 资源URI
+	MIMEType    string  // MIME类型
 }
 
 // ResourceTemplateAction 资源模板动作
 type ResourceTemplateAction struct {
-	BaseAction   // 嵌入基类
-	URITemplate  string                                // URI模板（如 file://docs/{docId}）
-	MIMEType     string                                // MIME类型
-	Read         func(uri string) (*ResourceContents, error)  // 读取函数
+	BaseAction   // 嵌入基类（含 Execute）
+	URITemplate  string  // URI模板（如 file://docs/{docId}）
+	MIMEType     string  // MIME类型
 }
 
 // GetType 获取Action类型

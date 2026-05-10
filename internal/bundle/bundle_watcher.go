@@ -175,11 +175,13 @@ func (w *BundleWatcher) watchLoop() {
 func (w *BundleWatcher) handleFileEvent(event notify.EventInfo) {
 	// 只处理.js文件
 	if !strings.HasSuffix(event.Path(), ".js") {
+		log.Printf("[bundle] file changed: skipped (not .js), path=%s", event.Path())
 		return
 	}
 
 	bundlePath := w.findBundlePath(event.Path())
 	if bundlePath == "" {
+		log.Printf("[bundle] file changed: skipped (no bundle), path=%s", event.Path())
 		return
 	}
 
@@ -205,11 +207,11 @@ func (w *BundleWatcher) handleFileEvent(event notify.EventInfo) {
 // scanAndNotify 首次扫描并通知已存在的bundle
 func (w *BundleWatcher) scanAndNotify() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	entries, err := os.ReadDir(w.watchPath)
 	if err != nil {
 		log.Printf("[bundle] watcher scan dir failed: %v", err)
+		w.mu.Unlock()
 		return
 	}
 
@@ -226,6 +228,7 @@ func (w *BundleWatcher) scanAndNotify() {
 
 		// 跳过没有index.js的目录
 		if _, err := os.Stat(indexFile); os.IsNotExist(err) {
+			log.Printf("[bundle] skipped: no index.js, path=%s", bundlePath)
 			continue
 		}
 
@@ -236,6 +239,30 @@ func (w *BundleWatcher) scanAndNotify() {
 		if _, known := w.knownBundles[bundleName]; !known {
 			discoveredCount++
 			log.Printf("[bundle] discovered: bundle=%s, path=%s", bundleName, bundlePath)
+		}
+	}
+
+	totalCount := len(newKnown)
+	w.mu.Unlock()
+
+	// 释放锁后再触发事件，避免死锁
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		bundleName := entry.Name()
+		bundlePath, ok := newKnown[bundleName]
+		if !ok {
+			continue
+		}
+
+		// 检查是否是新发现的（使用上一次的 knownBundles 比较）
+		w.mu.RLock()
+		_, known := w.knownBundles[bundleName]
+		w.mu.RUnlock()
+
+		if !known {
 			w.emit(BundleWatchEvent{
 				EventType:  BundleEventLoad,
 				BundleName: bundleName,
@@ -244,8 +271,12 @@ func (w *BundleWatcher) scanAndNotify() {
 		}
 	}
 
+	// 最后更新 knownBundles
+	w.mu.Lock()
 	w.knownBundles = newKnown
-	log.Printf("[bundle] watcher scanned: total=%d, discovered=%d", len(newKnown), discoveredCount)
+	w.mu.Unlock()
+
+	log.Printf("[bundle] watcher scanned: total=%d, discovered=%d", totalCount, discoveredCount)
 }
 
 // findBundlePath 根据文件路径查找所属的bundle路径

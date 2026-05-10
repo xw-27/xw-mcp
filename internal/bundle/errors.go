@@ -9,6 +9,7 @@ var (
 	ErrActionNotFound      = errors.New("action not found")        // Action未找到
 	ErrActionAlreadyExists = errors.New("action already exists")  // Action已存在
 	ErrInvalidActionType   = errors.New("invalid action type")     // 无效的Action类型
+	ErrInvalidActionID     = errors.New("invalid action id")       // 无效的Action ID格式
 	ErrBundlePathNotFound  = errors.New("bundle path not found")   // Bundle路径未找到
 	ErrIndexFileNotFound   = errors.New("index file not found")   // 入口文件未找到
 	ErrLoadFailed          = errors.New("load failed")            // 加载失败

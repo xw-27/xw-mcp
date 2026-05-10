@@ -32,31 +32,28 @@ func (c *BundleContext) initCallbacks() {
 	c.AddCallback(func(event BundleWatchEvent) {
 		switch event.EventType {
 		case BundleEventLoad:
-			// load事件：Bundle新增或更新
 			bundle, exists := c.Get(event.BundleName)
 			if !exists {
-				// 新增Bundle：创建并注册到Context
 				bundle = NewBundle(event.BundleName, event.BundlePath)
 				c.Register(bundle)
 			}
-			// 调用Loader半加载（只解析元数据）
+			log.Printf("[bundle] loading: bundle=%s, path=%s", event.BundleName, event.BundlePath)
+
+			bundle.LockLoad()
 			if err := c.BundleLoader.MetaLoad(bundle); err != nil {
-				log.Printf("[bundle] load failed: %s, path: %s, error: %v", event.BundleName, event.BundlePath, err)
+				bundle.UnlockLoad()
+				log.Printf("[bundle] load failed: bundle=%s, path=%s, error=%v", event.BundleName, event.BundlePath, err)
 				return
 			}
-			// 输出加载日志
+			bundle.UnlockLoad()
 			c.logBundleInfo(bundle)
 
 		case BundleEventUnload:
-			// unload事件：Bundle被删除
 			bundle, exists := c.Get(event.BundleName)
 			if exists {
-				log.Printf("[bundle] unloading: %s, path: %s", event.BundleName, event.BundlePath)
-				// 调用Loader卸载Bundle
+				log.Printf("[bundle] unloading: bundle=%s, path=%s", event.BundleName, event.BundlePath)
 				c.BundleLoader.Unload(bundle)
-				// 从Context注销Bundle
 				c.Unregister(event.BundleName)
-				log.Printf("[bundle] unloaded: %s", event.BundleName)
 			}
 		}
 	})
