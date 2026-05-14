@@ -17,7 +17,7 @@ import (
 
 // PluginManager 是插件管理器
 type PluginManager struct {
-	cfg        *config.ConfigManager
+	cfg        *config.ConfigWatcher
 	maxDepth   int
 	plugins    map[string]*Plugin
 	paths      map[string]string
@@ -31,10 +31,10 @@ type PluginManager struct {
 }
 
 // New 创建 PluginManager 实例
-// cfg: ConfigManager 实例，用于获取插件目录等配置
+// cfg: ConfigWatcher 实例，用于获取插件目录等配置
 // maxDepth: 最大扫描深度
 // callbacks: 可选的回调函数列表
-func New(cfg *config.ConfigManager, maxDepth int, callbacks ...EventCallback) (*PluginManager, error) {
+func New(cfg *config.ConfigWatcher, maxDepth int, callbacks ...EventCallback) (*PluginManager, error) {
 	_, ok := cfg.Get("server.plugins-dir")
 	if !ok {
 		return nil, fmt.Errorf("plugins-dir not found in config")
@@ -82,7 +82,7 @@ func (pm *PluginManager) initRuntime() error {
 // scanAndLoad 扫描目录并加载所有插件
 func (pm *PluginManager) scanAndLoad() error {
 	pluginsDir, _ := pm.cfg.Get("server.plugins-dir")
-	files, err := pm.scanDir(pluginsDir.String(), 0)
+	files, err := pm.scanDir(pluginsDir.ToString(), 0)
 	if err != nil {
 		return fmt.Errorf("scan dir failed: %w", err)
 	}
@@ -343,7 +343,7 @@ func (pm *PluginManager) watch() error {
 	pm.watcher = make(chan notify.EventInfo, 100)
 
 	pluginsDir, _ := pm.cfg.Get("server.plugins-dir")
-	watchPath := fmt.Sprintf("%s/...", pluginsDir.String())
+	watchPath := fmt.Sprintf("%s/...", pluginsDir.ToString())
 	if err := notify.Watch(watchPath, pm.watcher, notify.All); err != nil {
 		return fmt.Errorf("notify watch failed: %w", err)
 	}

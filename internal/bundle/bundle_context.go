@@ -3,6 +3,8 @@ package bundle
 import (
 	"log"
 	"sync"
+
+	"xw-mcp/internal/config"
 )
 
 // BundleContext Bundle全局上下文，管理所有Bundle实例
@@ -10,17 +12,21 @@ import (
 type BundleContext struct {
 	*BundleWatcher  // 嵌入Watcher（监控文件变化）
 	*BundleLoader    // 嵌入Loader（加载Bundle）
-	mu                sync.RWMutex
-	bundles           map[string]*Bundle         // Bundle集合（name -> Bundle）
+	mu               sync.RWMutex
+	bundles          map[string]*Bundle         // Bundle集合（name -> Bundle）
+	configWatcher    *config.ConfigWatcher      // 配置监听器（可为 nil）
 	afterLoadCallbacks []func(*BundleContext)   // 加载完成回调列表
 }
 
 // NewBundleContext 创建新的BundleContext实例
-func NewBundleContext() *BundleContext {
+//
+// cfg: 配置监听器，可为 nil
+func NewBundleContext(cfg *config.ConfigWatcher) *BundleContext {
 	c := &BundleContext{
-		BundleWatcher: NewBundleWatcher(),
-		BundleLoader: NewBundleLoader(),
-		bundles: make(map[string]*Bundle),
+		BundleWatcher:  NewBundleWatcher(),
+		BundleLoader:    NewBundleLoader(),
+		bundles:         make(map[string]*Bundle),
+		configWatcher:   cfg,
 	}
 
 	c.initCallbacks()
@@ -35,7 +41,7 @@ func (c *BundleContext) initCallbacks() {
 		case BundleEventLoad:
 			bundle, exists := c.Get(event.BundleName)
 			if !exists {
-				bundle = NewBundle(event.BundleName, event.BundlePath)
+				bundle = NewBundle(c.configWatcher, event.BundleName, event.BundlePath)
 				c.Register(bundle)
 			}
 			log.Printf("[bundle] loading: bundle=%s, path=%s", event.BundleName, event.BundlePath)
@@ -219,6 +225,7 @@ func (c *BundleContext) Close() error {
 		delete(c.bundles, name)
 	}
 
+	c.configWatcher = nil
 	log.Printf("[bundle] context closed")
 	return nil
 }

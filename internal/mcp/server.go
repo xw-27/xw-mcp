@@ -18,18 +18,18 @@ import (
 type McpServer struct {
 	server    *mcp.Server        // 底层 MCP Server
 	bundleCtx *bundle.BundleContext  // Bundle 上下文
-	cfg       *config.ConfigManager  // 配置管理器
+	cfg       *config.ConfigWatcher  // 配置监听器
 	port      int                 // HTTP 服务端口
 }
 
 // New 创建 MCP Server 实例
 // bundleCtx: Bundle 上下文，用于注册 AfterLoad 回调
 // cfg: 配置管理器，可选
-func New(bundleCtx *bundle.BundleContext, cfg *config.ConfigManager) *McpServer {
+func New(bundleCtx *bundle.BundleContext, cfg *config.ConfigWatcher) *McpServer {
 	port := 8080
 	if cfg != nil {
 		if portVal, ok := cfg.Get("server.port"); ok {
-			port = portVal.Int()
+			port = portVal.ToInt()
 		}
 	}
 

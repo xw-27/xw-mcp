@@ -3,3 +3,8 @@ server:
   port: 8080                      # MCP Server HTTP 端口
   bundle-dir: "bundles"            # 插件目录路径
   watch-depth: 3                   # 文件监控深度
+
+database:
+  - name: test
+    driver: sqlite3
+    dsn: "test.db"
