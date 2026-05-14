@@ -10,31 +10,48 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	// 解析命令行参数
+	configPath := flag.String("config", "config.yaml", "config file path")
 	flag.Parse()
 
-	cfg, err := config.New(*configPath)
+	// 加载配置文件
+	cfg, err := config.NewWatcher(*configPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("[main] load config failed: %v", err)
 	}
 	defer cfg.Close()
 
-	bundleCtx := bundle.NewBundleContext()
-	defer bundleCtx.Close()
-
-	bundlesPath := "bundles"
-	if pathVal, ok := cfg.Get("bundles.path"); ok {
-		bundlesPath = pathVal.String()
+	// 获取配置
+	bundleDir := "bundles"
+	if val, ok := cfg.Get("server.bundle-dir"); ok {
+		bundleDir = val.ToString()
 	}
 
-	if err := bundleCtx.StartWatcher(bundlesPath, 2); err != nil {
-		log.Fatalf("bundleCtx.StartWatcher failed: %v", err)
+	watchDepth := 3
+	if val, ok := cfg.Get("server.watch-depth"); ok {
+		watchDepth = val.ToInt()
 	}
 
-	server := mcp.New(bundleCtx, cfg)
-	defer server.Close()
+	log.Printf("[main] starting...")
+	log.Printf("[main] bundle dir: %s, watch depth: %d", bundleDir, watchDepth)
 
-	if err := server.Run(); err != nil {
-		log.Fatalf("mcp server run failed: %v", err)
+	// 创建 BundleContext
+	ctx := bundle.NewBundleContext(cfg)
+	defer ctx.Close()
+
+	// 创建 MCP Server
+	mcpServer := mcp.New(ctx, cfg)
+	defer mcpServer.Close()
+
+	// 启动文件监控
+	if err := ctx.StartWatcher(bundleDir, watchDepth); err != nil {
+		log.Fatalf("[main] start watcher failed: %v", err)
+	}
+
+	log.Printf("[main] started, watching %s", bundleDir)
+
+	// 启动 MCP Server（阻塞）
+	if err := mcpServer.Run(); err != nil {
+		log.Fatalf("[main] mcp server failed: %v", err)
 	}
 }

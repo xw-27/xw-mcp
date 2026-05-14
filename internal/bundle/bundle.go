@@ -7,6 +7,7 @@ import (
 	"github.com/dop251/goja_nodejs/require"
 
 	"xw-mcp/internal/actionsdk"
+	"xw-mcp/internal/config"
 )
 
 // LoadState Bundle加载状态
@@ -24,32 +25,38 @@ const (
 
 // Bundle 插件项目单元，每个Bundle拥有独立的Runtime和ActionRegistry
 type Bundle struct {
-	name           string          // Bundle名称（目录名）
-	path           string          // Bundle路径
-	indexFile      string          // 入口文件名
-	runtime        *goja.Runtime   // JavaScript运行时（每个Bundle独立）
-	registry       *ActionRegistry // 动作注册表
-	enabled        bool            // 是否启用
-	loadState      LoadState       // 当前加载状态
-	loadError      error           // 加载错误信息
-	mu             sync.RWMutex    // 读写锁（保护 loadState/loadError）
-	loadMu         sync.Mutex      // 加载互斥锁（防止 Load/Unload 并发）
-	requireRegistry *require.Registry // 模块注册表（用于重置Runtime）
-	moduleReg      *require.RequireModule // 模块注册（用于 native module 加载）
-	lifecycleManager *actionsdk.LifecycleManager // SDK 生命周期管理器
-	doActionMu     sync.Mutex      // DoAction 执行锁（防止并发执行导致资源销毁问题）
+	name             string                        // Bundle名称（目录名）
+	path             string                        // Bundle路径
+	indexFile        string                        // 入口文件名
+	runtime          *goja.Runtime                 // JavaScript运行时（每个Bundle独立）
+	registry         *ActionRegistry               // 动作注册表
+	enabled          bool                          // 是否启用
+	loadState        LoadState                     // 当前加载状态
+	loadError        error                         // 加载错误信息
+	mu               sync.RWMutex                  // 读写锁（保护 loadState/loadError）
+	loadMu           sync.Mutex                    // 加载互斥锁（防止 Load/Unload 并发）
+	requireRegistry  *require.Registry             // 模块注册表（用于重置Runtime）
+	moduleReg        *require.RequireModule         // 模块注册（用于 native module 加载）
+	lifecycleManager *actionsdk.LifecycleManager   // SDK 生命周期管理器
+	configWatcher    *config.ConfigWatcher         // 配置监听器（可为 nil）
+	doActionMu       sync.Mutex                    // DoAction 执行锁（防止并发执行导致资源销毁问题）
 }
 
 // NewBundle 创建新的Bundle实例
-func NewBundle(name, path string) *Bundle {
+//
+// cfg: 配置监听器，可为 nil
+// name: Bundle 名称
+// path: Bundle 路径
+func NewBundle(cfg *config.ConfigWatcher, name, path string) *Bundle {
 	return &Bundle{
-		name:             name,
-		path:             path,
-		indexFile:        "index.js",
-		registry:         NewActionRegistry(),
-		enabled:          true,
-		loadState:        LoadStateNone,
-		lifecycleManager: actionsdk.NewLifecycleManager(),
+		name:            name,
+		path:            path,
+		indexFile:       "index.js",
+		registry:        NewActionRegistry(),
+		enabled:         true,
+		loadState:       LoadStateNone,
+		lifecycleManager: actionsdk.NewLifecycleManager(cfg),
+		configWatcher:   cfg,
 	}
 }
 
@@ -169,6 +176,7 @@ func (b *Bundle) Close() error {
 		b.lifecycleManager = nil
 	}
 	b.registry.Clear()
+	b.configWatcher = nil
 	b.loadState = LoadStateClosed
 	b.loadError = nil
 	return nil
@@ -188,13 +196,14 @@ func (b *Bundle) Suspend() {
 }
 
 // Wake 唤醒挂起的Bundle，重新创建lifecycleManager
+//
 // 仅在状态为LoadStateSuspended时有效
 func (b *Bundle) Wake() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.loadState == LoadStateSuspended {
-		b.lifecycleManager = actionsdk.NewLifecycleManager()
+		b.lifecycleManager = actionsdk.NewLifecycleManager(b.configWatcher)
 		b.loadState = LoadStateNone
 	}
 }

@@ -15,7 +15,7 @@ func main() {
 	flag.Parse()
 
 	// 加载配置文件
-	cfg, err := config.New(*configPath)
+	cfg, err := config.NewWatcher(*configPath)
 	if err != nil {
 		log.Fatalf("[main] load config failed: %v", err)
 	}
@@ -24,19 +24,19 @@ func main() {
 	// 获取配置
 	bundleDir := "bundles"
 	if val, ok := cfg.Get("server.bundle-dir"); ok {
-		bundleDir = val.String()
+		bundleDir = val.ToString()
 	}
 
 	watchDepth := 3
 	if val, ok := cfg.Get("server.watch-depth"); ok {
-		watchDepth = val.Int()
+		watchDepth = val.ToInt()
 	}
 
 	log.Printf("[main] starting...")
 	log.Printf("[main] bundle dir: %s, watch depth: %d", bundleDir, watchDepth)
 
 	// 创建 BundleContext
-	ctx := bundle.NewBundleContext()
+	ctx := bundle.NewBundleContext(cfg)
 	defer ctx.Close()
 
 	// 创建 MCP Server

@@ -5,7 +5,10 @@ import (
 
 	"github.com/dop251/goja"
 
+	"xw-mcp/internal/actionsdk/conf"
 	"xw-mcp/internal/actionsdk/log"
+	"xw-mcp/internal/actionsdk/sql"
+	configpkg "xw-mcp/internal/config"
 )
 
 // Destroyable 资源销毁接口
@@ -26,12 +29,17 @@ type LifecycleManager struct {
 }
 
 // NewLifecycleManager 创建生命周期管理器，初始化模块列表
-func NewLifecycleManager() *LifecycleManager {
-	return &LifecycleManager{
-		modules: []ActionModule{
-			&log.LogModule{},
-		},
+//
+// cfg: 配置监听器，可为 nil
+func NewLifecycleManager(cfg *configpkg.ConfigWatcher) *LifecycleManager {
+	modules := []ActionModule{
+		sql.NewModule(),
+		&log.LogModule{},
 	}
+	if cfg != nil {
+		modules = append(modules, conf.NewModule(cfg))
+	}
+	return &LifecycleManager{modules: modules}
 }
 
 // RegisterAllModules 注册所有模块到VM全局
